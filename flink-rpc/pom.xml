@@ -37,5 +37,6 @@ under the License.
 		<module>flink-rpc-core</module>
 		<module>flink-rpc-akka</module>
 		<module>flink-rpc-akka-loader</module>
+		<module>flink-rpc-demo</module>
 	</modules>
 </project>
