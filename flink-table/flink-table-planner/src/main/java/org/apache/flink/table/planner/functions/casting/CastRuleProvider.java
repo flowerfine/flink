@@ -24,6 +24,7 @@ import org.apache.flink.table.types.logical.DistinctType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.LogicalTypeFamily;
 import org.apache.flink.table.types.logical.LogicalTypeRoot;
+import org.apache.flink.table.types.logical.NullType;
 
 import javax.annotation.Nullable;
 
@@ -64,6 +65,7 @@ public class CastRuleProvider {
                 .addRule(IntervalToStringCastRule.INSTANCE)
                 .addRule(ArrayToStringCastRule.INSTANCE)
                 .addRule(MapAndMultisetToStringCastRule.INSTANCE)
+                .addRule(StructuredToStringCastRule.INSTANCE)
                 .addRule(RowToStringCastRule.INSTANCE)
                 .addRule(RawToStringCastRule.INSTANCE)
                 // From string rules
@@ -74,11 +76,20 @@ public class CastRuleProvider {
                 .addRule(StringToTimeCastRule.INSTANCE)
                 .addRule(StringToTimestampCastRule.INSTANCE)
                 .addRule(StringToBinaryCastRule.INSTANCE)
+                // Date/Time/Timestamp rules
+                .addRule(TimestampToTimestampCastRule.INSTANCE)
+                .addRule(TimestampToDateCastRule.INSTANCE)
+                .addRule(TimestampToTimeCastRule.INSTANCE)
+                .addRule(DateToTimestampCastRule.INSTANCE)
+                .addRule(TimeToTimestampCastRule.INSTANCE)
+                .addRule(NumericToTimestampCastRule.INSTANCE)
+                .addRule(TimestampToNumericCastRule.INSTANCE)
                 // To binary rules
                 .addRule(BinaryToBinaryCastRule.INSTANCE)
                 .addRule(RawToBinaryCastRule.INSTANCE)
                 // Collection rules
                 .addRule(ArrayToArrayCastRule.INSTANCE)
+                .addRule(MapToMapAndMultisetToMultisetCastRule.INSTANCE)
                 .addRule(RowToRowCastRule.INSTANCE)
                 // Special rules
                 .addRule(CharVarCharTrimPadCastRule.INSTANCE)
@@ -143,6 +154,25 @@ public class CastRuleProvider {
                         context, inputTerm, inputIsNullTerm, inputLogicalType, targetLogicalType);
     }
 
+    /**
+     * This method wraps {@link #generateCodeBlock(CodeGeneratorCastRule.Context, String, String,
+     * LogicalType, LogicalType)}, but adding the assumption that the inputTerm is always non-null.
+     * Used by {@link CodeGeneratorCastRule}s which checks for nullability, rather than deferring
+     * the check to the rules.
+     */
+    static CastCodeBlock generateAlwaysNonNullCodeBlock(
+            CodeGeneratorCastRule.Context context,
+            String inputTerm,
+            LogicalType inputLogicalType,
+            LogicalType targetLogicalType) {
+        if (inputLogicalType instanceof NullType) {
+            return generateCodeBlock(
+                    context, inputTerm, "true", inputLogicalType, targetLogicalType);
+        }
+        return generateCodeBlock(
+                context, inputTerm, "false", inputLogicalType.copy(false), targetLogicalType);
+    }
+
     /* ------ Implementation ------ */
 
     // Map<Target family or root, Map<Input family or root, rule>>
@@ -183,7 +213,7 @@ public class CastRuleProvider {
             }
         }
 
-        if (predicate.getCustomPredicate() != null) {
+        if (predicate.getCustomPredicate().isPresent()) {
             rulesWithCustomPredicate.add(rule);
         }
 
@@ -195,7 +225,7 @@ public class CastRuleProvider {
         LogicalType targetType = unwrapDistinct(target);
 
         final Iterator<Object> targetTypeRootFamilyIterator =
-                Stream.<Object>concat(
+                Stream.concat(
                                 Stream.of(targetType),
                                 Stream.<Object>concat(
                                         Stream.of(targetType.getTypeRoot()),
@@ -231,7 +261,8 @@ public class CastRuleProvider {
                         r ->
                                 r.getPredicateDefinition()
                                         .getCustomPredicate()
-                                        .test(inputType, targetType))
+                                        .map(p -> p.test(inputType, targetType))
+                                        .orElse(false))
                 .findFirst()
                 .orElse(null);
     }

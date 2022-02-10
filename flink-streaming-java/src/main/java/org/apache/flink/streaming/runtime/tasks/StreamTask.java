@@ -20,6 +20,7 @@ package org.apache.flink.streaming.runtime.tasks;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.operators.MailboxExecutor;
+import org.apache.flink.api.common.operators.ProcessingTimeService.ProcessingTimeCallback;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.core.fs.AutoCloseableRegistry;
@@ -34,6 +35,8 @@ import org.apache.flink.runtime.checkpoint.CheckpointMetaData;
 import org.apache.flink.runtime.checkpoint.CheckpointMetricsBuilder;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
 import org.apache.flink.runtime.checkpoint.CheckpointType;
+import org.apache.flink.runtime.checkpoint.SavepointType;
+import org.apache.flink.runtime.checkpoint.SnapshotType;
 import org.apache.flink.runtime.checkpoint.channel.ChannelStateWriter;
 import org.apache.flink.runtime.checkpoint.channel.InputChannelInfo;
 import org.apache.flink.runtime.checkpoint.channel.SequentialChannelStateReader;
@@ -546,7 +549,7 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
         PeriodTimer timer;
         CompletableFuture<?> resumeFuture;
         if (!recordWriter.isAvailable()) {
-            timer = new GaugePeriodTimer(ioMetrics.getBackPressuredTimePerSecond());
+            timer = new GaugePeriodTimer(ioMetrics.getSoftBackPressuredTimePerSecond());
             resumeFuture = recordWriter.getAvailableFuture();
         } else if (!inputProcessor.isAvailable()) {
             timer = new GaugePeriodTimer(ioMetrics.getIdleTimeMsPerSecond());
@@ -1227,7 +1230,7 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
             CheckpointMetricsBuilder checkpointMetrics)
             throws Exception {
 
-        final CheckpointType checkpointType = checkpointOptions.getCheckpointType();
+        final SnapshotType checkpointType = checkpointOptions.getCheckpointType();
         LOG.debug(
                 "Starting checkpoint {} {} on task {}",
                 checkpointMetaData.getCheckpointId(),
@@ -1237,7 +1240,7 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
         if (isRunning) {
             actionExecutor.runThrowing(
                     () -> {
-                        if (checkpointType.isSynchronous()) {
+                        if (isSynchronous(checkpointType)) {
                             setSynchronousSavepoint(checkpointMetaData.getCheckpointId());
                         }
 
@@ -1276,8 +1279,12 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
         }
     }
 
+    private boolean isSynchronous(SnapshotType checkpointType) {
+        return checkpointType.isSavepoint() && ((SavepointType) checkpointType).isSynchronous();
+    }
+
     private void checkForcedFullSnapshotSupport(CheckpointOptions checkpointOptions) {
-        if (checkpointOptions.getCheckpointType() == CheckpointType.FULL_CHECKPOINT
+        if (checkpointOptions.getCheckpointType().equals(CheckpointType.FULL_CHECKPOINT)
                 && !stateBackend.supportsNoClaimRestoreMode()) {
             throw new IllegalStateException(
                     String.format(

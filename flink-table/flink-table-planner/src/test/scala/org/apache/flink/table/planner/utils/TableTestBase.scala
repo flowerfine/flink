@@ -26,6 +26,7 @@ import org.apache.flink.api.common.typeinfo.{AtomicType, TypeInformation}
 import org.apache.flink.api.java.typeutils.{PojoTypeInfo, RowTypeInfo, TupleTypeInfo}
 import org.apache.flink.api.scala.typeutils.CaseClassTypeInfo
 import org.apache.flink.configuration.ExecutionOptions
+
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import org.apache.flink.streaming.api.datastream.DataStream
 import org.apache.flink.streaming.api.environment.{LocalStreamEnvironment, StreamExecutionEnvironment}
@@ -46,13 +47,13 @@ import org.apache.flink.table.expressions.Expression
 import org.apache.flink.table.factories.{FactoryUtil, PlannerFactoryUtil, StreamTableSourceFactory}
 import org.apache.flink.table.functions._
 import org.apache.flink.table.module.ModuleManager
-import org.apache.flink.table.operations.{CatalogSinkModifyOperation, ModifyOperation, Operation, QueryOperation}
+import org.apache.flink.table.operations.{ModifyOperation, Operation, QueryOperation, SinkModifyOperation}
 import org.apache.flink.table.planner.calcite.CalciteConfig
 import org.apache.flink.table.planner.delegation.PlannerBase
 import org.apache.flink.table.planner.functions.sql.FlinkSqlOperatorTable
 import org.apache.flink.table.planner.operations.{InternalDataStreamQueryOperation, PlannerQueryOperation, RichTableSourceQueryOperation}
 import org.apache.flink.table.planner.plan.nodes.calcite.LogicalWatermarkAssigner
-import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeBase
+import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeContext
 import org.apache.flink.table.planner.plan.nodes.exec.utils.ExecNodePlanDumper
 import org.apache.flink.table.planner.plan.optimize.program._
 import org.apache.flink.table.planner.plan.stats.FlinkStatistic
@@ -68,6 +69,7 @@ import org.apache.flink.table.types.logical.LogicalType
 import org.apache.flink.table.types.utils.TypeConversions
 import org.apache.flink.table.typeutils.FieldInfoUtils
 import org.apache.flink.types.Row
+
 import org.junit.Assert.{assertEquals, assertTrue, fail}
 import org.junit.Rule
 import org.junit.rules.{ExpectedException, TemporaryFolder, TestName}
@@ -77,6 +79,7 @@ import _root_.java.util
 import java.io.{File, IOException}
 import java.nio.file.{Files, Paths}
 import java.time.Duration
+
 import _root_.scala.collection.JavaConversions._
 import _root_.scala.io.Source
 
@@ -396,6 +399,30 @@ abstract class TableTestUtilBase(test: TableTestBase, isStreamingMode: Boolean) 
   }
 
   /**
+   * Verify the AST (abstract syntax tree).
+   */
+  def verifyAstPlan(stmtSet: StatementSet): Unit = {
+    doVerifyPlan(
+      stmtSet,
+      Array.empty[ExplainDetail],
+      withRowType = false,
+      Array(PlanKind.AST),
+      () => Unit)
+  }
+
+  /**
+   * Verify the AST (abstract syntax tree). The plans will contain the extra [[ExplainDetail]]s.
+   */
+  def verifyAstPlan(stmtSet: StatementSet, extraDetails: ExplainDetail*): Unit = {
+    doVerifyPlan(
+      stmtSet,
+      extraDetails.toArray,
+      withRowType = false,
+      Array(PlanKind.AST),
+      () => Unit)
+  }
+
+  /**
    * Verify the AST (abstract syntax tree) and the optimized rel plan for the given SELECT query.
    */
   def verifyRelPlan(query: String): Unit = {
@@ -675,6 +702,22 @@ abstract class TableTestUtilBase(test: TableTestBase, isStreamingMode: Boolean) 
   }
 
   /**
+   * Verify the explain result for the given sql clause which represents a [[ModifyOperation]].
+   */
+  def verifyExplainSql(sql: String): Unit = {
+    val operations = getTableEnv.asInstanceOf[TableEnvironmentImpl].getParser.parse(sql)
+    val relNode = TableTestUtil.toRelNode(
+      getTableEnv,
+      operations.get(0).asInstanceOf[ModifyOperation])
+    assertPlanEquals(
+      Array(relNode),
+      Array.empty[ExplainDetail],
+      withRowType = false,
+      Array(PlanKind.AST, PlanKind.OPT_REL),
+      () => assertEqualsOrExpand("sql", sql))
+  }
+
+  /**
    * Verify the explain result for the given [[Table]]. See more about [[Table#explain()]].
    */
   def verifyExplain(table: Table): Unit = {
@@ -732,31 +775,38 @@ abstract class TableTestUtilBase(test: TableTestBase, isStreamingMode: Boolean) 
     doVerifyExplain(stmtSet.explain(extraDetails: _*), extraDetails: _*)
   }
 
+  final val PLAN_TEST_FORCE_OVERWRITE = "PLAN_TEST_FORCE_OVERWRITE"
+
   /**
    * Verify the json plan for the given insert statement.
    */
   def verifyJsonPlan(insert: String): Unit = {
-    ExecNodeBase.resetIdCounter()
-    val jsonPlan = getTableEnv.asInstanceOf[TableEnvironmentInternal].getJsonPlan(insert)
-    val jsonPlanWithoutFlinkVersion = TableTestUtil.replaceFlinkVersion(jsonPlan)
+    ExecNodeContext.resetIdCounter()
+    val jsonPlan = getTableEnv.asInstanceOf[TableEnvironmentInternal].compilePlanSql(insert)
+    val jsonPlanWithoutFlinkVersion = TableTestUtil.replaceFlinkVersion(jsonPlan.asJsonString())
     // add the postfix to the path to avoid conflicts
     // between the test class name and the result file name
-    val path = test.getClass.getName.replaceAll("\\.", "/") + "_jsonplan"
-    val fileName = test.testName.getMethodName + ".out"
-    val file = new File(s"./src/test/resources/$path/$fileName")
-    if (file.exists()) {
-      val expected = TableTestUtil.readFromResource(s"$path/$fileName")
+    val clazz = test.getClass
+    val testClassDirPath = clazz.getName.replaceAll("\\.", "/") + "_jsonplan"
+    val testMethodFileName = test.testName.getMethodName + ".out"
+    val resourceTestFilePath = s"/$testClassDirPath/$testMethodFileName"
+    val plannerDirPath = clazz.getResource("/").getFile.replace("/target/test-classes/", "")
+    val file = new File(s"$plannerDirPath/src/test/resources$resourceTestFilePath")
+    val path = file.toPath
+    if (!file.exists() || "true".equalsIgnoreCase(System.getenv(PLAN_TEST_FORCE_OVERWRITE))) {
+      Files.deleteIfExists(path)
+      file.getParentFile.mkdirs()
+      assertTrue(file.createNewFile())
+      val prettyJson = TableTestUtil.getPrettyJson(jsonPlanWithoutFlinkVersion)
+      Files.write(path, prettyJson.getBytes)
+      fail(s"$testMethodFileName regenerated.")
+    } else {
+      val expected = String.join("\n", Files.readAllLines(path))
       assertEquals(
         TableTestUtil.replaceExecNodeId(
           TableTestUtil.getFormattedJson(expected)),
         TableTestUtil.replaceExecNodeId(
           TableTestUtil.getFormattedJson(jsonPlanWithoutFlinkVersion)))
-    } else {
-      file.getParentFile.mkdirs()
-      assertTrue(file.createNewFile())
-      val prettyJson = TableTestUtil.getPrettyJson(jsonPlanWithoutFlinkVersion)
-      Files.write(Paths.get(file.toURI), prettyJson.getBytes)
-      fail(s"$fileName does not exist.")
     }
   }
 
@@ -1484,9 +1534,10 @@ class TestingStatementSet(tEnv: TestingTableEnvironment) extends StatementSet {
   override def addInsert(targetPath: String, table: Table, overwrite: Boolean): StatementSet = {
     val unresolvedIdentifier = tEnv.getParser.parseIdentifier(targetPath)
     val objectIdentifier = tEnv.getCatalogManager.qualifyIdentifier(unresolvedIdentifier)
+    val resolvedTable = tEnv.getCatalogManager.getTable(objectIdentifier).get()
 
-    operations.add(new CatalogSinkModifyOperation(
-      objectIdentifier,
+    operations.add(new SinkModifyOperation(
+      resolvedTable,
       table.getQueryOperation,
       util.Collections.emptyMap[String, String],
       overwrite,
@@ -1587,13 +1638,23 @@ object TableTestUtil {
   val BATCH_SETTING: EnvironmentSettings = EnvironmentSettings.newInstance().inBatchMode().build()
 
   /**
-   * Converts operation tree in the given table to a RelNode tree.
+   * Convert operation tree in the given table to a RelNode tree.
    */
   def toRelNode(table: Table): RelNode = {
     table.asInstanceOf[TableImpl]
       .getTableEnvironment.asInstanceOf[TableEnvironmentImpl]
       .getPlanner.asInstanceOf[PlannerBase]
       .getRelBuilder.queryOperation(table.getQueryOperation).build()
+  }
+
+  /**
+   * Convert modify operation to a RelNode tree.
+   */
+  def toRelNode(
+      tEnv: TableEnvironment,
+      modifyOperation: ModifyOperation): RelNode = {
+    val planner = tEnv.asInstanceOf[TableEnvironmentImpl].getPlanner.asInstanceOf[PlannerBase]
+    planner.translateToRel(modifyOperation)
   }
 
   def createTemporaryView[T](

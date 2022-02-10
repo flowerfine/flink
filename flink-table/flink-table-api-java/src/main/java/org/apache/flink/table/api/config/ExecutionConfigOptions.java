@@ -22,6 +22,7 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.docs.Documentation;
 import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.DescribedEnum;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.MemorySize;
@@ -120,15 +121,16 @@ public class ExecutionConfigOptions {
                             "Determines how Flink enforces NOT NULL column constraints when inserting null values.");
 
     @Documentation.TableOption(execMode = Documentation.ExecMode.BATCH_STREAMING)
-    public static final ConfigOption<CharLengthEnforcer> TABLE_EXEC_SINK_CHAR_LENGTH_ENFORCER =
-            key("table.exec.sink.char-length-enforcer")
-                    .enumType(CharLengthEnforcer.class)
-                    .defaultValue(CharLengthEnforcer.IGNORE)
+    public static final ConfigOption<TypeLengthEnforcer> TABLE_EXEC_SINK_TYPE_LENGTH_ENFORCER =
+            key("table.exec.sink.type-length-enforcer")
+                    .enumType(TypeLengthEnforcer.class)
+                    .defaultValue(TypeLengthEnforcer.IGNORE)
                     .withDescription(
-                            "Determines whether string values for columns with CHAR(<length>)/VARCHAR(<length>) "
-                                    + "types will be trimmed or padded (only for CHAR(<length>)), so that their "
-                                    + "length will match the one defined by the length of their respective "
-                                    + "CHAR/VARCHAR column type.");
+                            "Determines whether values for columns with CHAR(<length>)/VARCHAR(<length>)"
+                                    + "/BINARY(<length>)/VARBINARY(<length>) types will be trimmed or padded "
+                                    + "(only for CHAR(<length>)/BINARY(<length>)), so that their length "
+                                    + "will match the one defined by the length of their respective "
+                                    + "CHAR/VARCHAR/BINARY/VARBINARY column type.");
 
     @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
     public static final ConfigOption<UpsertMaterialize> TABLE_EXEC_SINK_UPSERT_MATERIALIZE =
@@ -174,6 +176,7 @@ public class ExecutionConfigOptions {
     @Documentation.TableOption(execMode = Documentation.ExecMode.BATCH)
     public static final ConfigOption<Integer> TABLE_EXEC_SORT_DEFAULT_LIMIT =
             key("table.exec.sort.default-limit")
+                    .intType()
                     .defaultValue(-1)
                     .withDescription(
                             "Default limit when user don't set a limit after order by. -1 indicates that this configuration is ignored.");
@@ -181,6 +184,7 @@ public class ExecutionConfigOptions {
     @Documentation.TableOption(execMode = Documentation.ExecMode.BATCH)
     public static final ConfigOption<Integer> TABLE_EXEC_SORT_MAX_NUM_FILE_HANDLES =
             key("table.exec.sort.max-num-file-handles")
+                    .intType()
                     .defaultValue(128)
                     .withDescription(
                             "The maximal fan-in for external merge sort. It limits the number of file handles per operator. "
@@ -190,6 +194,7 @@ public class ExecutionConfigOptions {
     @Documentation.TableOption(execMode = Documentation.ExecMode.BATCH)
     public static final ConfigOption<Boolean> TABLE_EXEC_SORT_ASYNC_MERGE_ENABLED =
             key("table.exec.sort.async-merge-enabled")
+                    .booleanType()
                     .defaultValue(true)
                     .withDescription("Whether to asynchronously merge sorted spill files.");
 
@@ -199,6 +204,7 @@ public class ExecutionConfigOptions {
     @Documentation.TableOption(execMode = Documentation.ExecMode.BATCH)
     public static final ConfigOption<Boolean> TABLE_EXEC_SPILL_COMPRESSION_ENABLED =
             key("table.exec.spill-compression.enabled")
+                    .booleanType()
                     .defaultValue(true)
                     .withDescription(
                             "Whether to compress spilled data. "
@@ -220,6 +226,7 @@ public class ExecutionConfigOptions {
     @Documentation.TableOption(execMode = Documentation.ExecMode.BATCH_STREAMING)
     public static final ConfigOption<Integer> TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM =
             key("table.exec.resource.default-parallelism")
+                    .intType()
                     .defaultValue(-1)
                     .withDescription(
                             "Sets default parallelism for all operators "
@@ -292,6 +299,7 @@ public class ExecutionConfigOptions {
     @Documentation.TableOption(execMode = Documentation.ExecMode.BATCH)
     public static final ConfigOption<Integer> TABLE_EXEC_WINDOW_AGG_BUFFER_SIZE_LIMIT =
             key("table.exec.window-agg.buffer-size-limit")
+                    .intType()
                     .defaultValue(100 * 1000)
                     .withDescription(
                             "Sets the window elements buffer size limit used in group window agg operator.");
@@ -302,6 +310,7 @@ public class ExecutionConfigOptions {
     @Documentation.TableOption(execMode = Documentation.ExecMode.BATCH_STREAMING)
     public static final ConfigOption<Integer> TABLE_EXEC_ASYNC_LOOKUP_BUFFER_CAPACITY =
             key("table.exec.async-lookup.buffer-capacity")
+                    .intType()
                     .defaultValue(100)
                     .withDescription(
                             "The max number of async i/o operation that the async lookup join can trigger.");
@@ -320,6 +329,7 @@ public class ExecutionConfigOptions {
     @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
     public static final ConfigOption<Boolean> TABLE_EXEC_MINIBATCH_ENABLED =
             key("table.exec.mini-batch.enabled")
+                    .booleanType()
                     .defaultValue(false)
                     .withDescription(
                             "Specifies whether to enable MiniBatch optimization. "
@@ -344,6 +354,7 @@ public class ExecutionConfigOptions {
     @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
     public static final ConfigOption<Long> TABLE_EXEC_MINIBATCH_SIZE =
             key("table.exec.mini-batch.size")
+                    .longType()
                     .defaultValue(-1L)
                     .withDescription(
                             "The maximum number of input records can be buffered for MiniBatch. "
@@ -359,6 +370,7 @@ public class ExecutionConfigOptions {
     @Documentation.TableOption(execMode = Documentation.ExecMode.BATCH)
     public static final ConfigOption<String> TABLE_EXEC_DISABLED_OPERATORS =
             key("table.exec.disabled-operators")
+                    .stringType()
                     .noDefaultValue()
                     .withDescription(
                             "Mainly for testing. A comma-separated list of operator names, each name "
@@ -413,6 +425,17 @@ public class ExecutionConfigOptions {
                             "Determines whether CAST will operate following the legacy behaviour "
                                     + "or the new one that introduces various fixes and improvements.");
 
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<Long> TABLE_EXEC_RANK_TOPN_CACHE_SIZE =
+            ConfigOptions.key("table.exec.rank.topn-cache-size")
+                    .longType()
+                    .defaultValue(10000L)
+                    .withDeprecatedKeys("table.exec.topn-cache-size")
+                    .withDescription(
+                            "Rank operators have a cache which caches partial state contents "
+                                    + "to reduce state access. Cache size is the number of records "
+                                    + "in each ranking task.");
+
     // ------------------------------------------------------------------------------------------
     // Enum option types
     // ------------------------------------------------------------------------------------------
@@ -440,23 +463,23 @@ public class ExecutionConfigOptions {
     }
 
     /**
-     * The enforcer to guarantee that length of CHAR/VARCHAR columns is respected when writing data
-     * into sink.
+     * The enforcer to guarantee that length of CHAR/VARCHAR/BINARY/VARBINARY columns is respected
+     * when writing data into a sink.
      */
     @PublicEvolving
-    public enum CharLengthEnforcer implements DescribedEnum {
+    public enum TypeLengthEnforcer implements DescribedEnum {
         IGNORE(
                 text(
                         "Don't apply any trimming and padding, and instead "
-                                + "ignore the CHAR/VARCHAR length directive.")),
+                                + "ignore the CHAR/VARCHAR/BINARY/VARBINARY length directive.")),
         TRIM_PAD(
                 text(
-                        "Trim and pad string values to match the length "
-                                + "defined by the CHAR/VARCHAR length."));
+                        "Trim and pad string and binary values to match the length "
+                                + "defined by the CHAR/VARCHAR/BINARY/VARBINARY length."));
 
         private final InlineElement description;
 
-        CharLengthEnforcer(InlineElement description) {
+        TypeLengthEnforcer(InlineElement description) {
             this.description = description;
         }
 
