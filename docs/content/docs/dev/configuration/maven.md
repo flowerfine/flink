@@ -32,7 +32,7 @@ entire lifecycle of your software project.
 ## Requirements
 
 - Maven 3.0.4 (or higher)
-- Java 8.x
+- Java 11
 
 ## Importing the project into your IDE
 
@@ -64,7 +64,7 @@ can run the application from the JAR file without additionally specifying the ma
 
 ## Adding dependencies to the project
 
-Open the `pom.xml` file in your profile directory and add the dependency in between
+Open the `pom.xml` file in your project directory and add the dependency in between
 the `dependencies` tab.  
 
 For example, you can add the Kafka connector as a dependency like this:
