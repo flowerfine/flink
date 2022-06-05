@@ -34,9 +34,7 @@ import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.testutils.KafkaSinkExternalContextFactory;
 import org.apache.flink.connector.kafka.testutils.KafkaUtil;
 import org.apache.flink.connector.testframe.environment.MiniClusterTestEnvironment;
-import org.apache.flink.connector.testframe.environment.TestEnvironment;
 import org.apache.flink.connector.testframe.external.DefaultContainerizedExternalSystem;
-import org.apache.flink.connector.testframe.external.sink.DataStreamSinkExternalContext;
 import org.apache.flink.connector.testframe.junit.annotations.TestContext;
 import org.apache.flink.connector.testframe.junit.annotations.TestEnv;
 import org.apache.flink.connector.testframe.junit.annotations.TestExternalSystem;
@@ -81,9 +79,7 @@ import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.TestTemplate;
 import org.junit.rules.TemporaryFolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -205,15 +201,6 @@ public class KafkaSinkITCase extends TestLogger {
         @TestContext
         KafkaSinkExternalContextFactory sinkContext =
                 new KafkaSinkExternalContextFactory(kafka.getContainer(), Collections.emptyList());
-
-        @Disabled("Skip metric test until FLINK-26126 fixed")
-        @TestTemplate
-        @Override
-        public void testMetrics(
-                TestEnvironment testEnv,
-                DataStreamSinkExternalContext<String> externalContext,
-                CheckpointingMode semantic)
-                throws Exception {}
     }
 
     @Test
@@ -348,7 +335,7 @@ public class KafkaSinkITCase extends TestLogger {
         final DataStream<Long> stream = source.map(mapper);
         final KafkaSinkBuilder<Long> builder =
                 new KafkaSinkBuilder<Long>()
-                        .setDeliverGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
+                        .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
                         .setBootstrapServers(KAFKA_CONTAINER.getBootstrapServers())
                         .setRecordSerializer(
                                 KafkaRecordSerializationSchema.builder()
@@ -378,7 +365,7 @@ public class KafkaSinkITCase extends TestLogger {
 
         stream.sinkTo(
                 new KafkaSinkBuilder<Long>()
-                        .setDeliverGuarantee(guarantee)
+                        .setDeliveryGuarantee(guarantee)
                         .setBootstrapServers(KAFKA_CONTAINER.getBootstrapServers())
                         .setRecordSerializer(
                                 KafkaRecordSerializationSchema.builder()
@@ -407,7 +394,7 @@ public class KafkaSinkITCase extends TestLogger {
         source.sinkTo(
                 new KafkaSinkBuilder<Long>()
                         .setBootstrapServers(KAFKA_CONTAINER.getBootstrapServers())
-                        .setDeliverGuarantee(deliveryGuarantee)
+                        .setDeliveryGuarantee(deliveryGuarantee)
                         .setRecordSerializer(
                                 KafkaRecordSerializationSchema.builder()
                                         .setTopic(topic)

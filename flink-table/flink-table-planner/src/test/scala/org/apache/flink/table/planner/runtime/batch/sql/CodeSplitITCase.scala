@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.flink.table.planner.runtime.batch.sql
 
 import org.apache.flink.table.api.config.TableConfigOptions
@@ -91,24 +90,28 @@ class CodeSplitITCase extends BatchTestBase {
 
   @Test
   def testManyValues(): Unit = {
-    tEnv.executeSql(
-      s"""
-         |CREATE TABLE test_many_values (
-         |${Range(0, 100).map(i => s"  f$i INT").mkString(",\n")}
-         |) WITH (
-         |  'connector' = 'values'
-         |)
-         |""".stripMargin
-    ).await()
+    tEnv
+      .executeSql(
+        s"""
+           |CREATE TABLE test_many_values (
+           |${Range(0, 100).map(i => s"  f$i INT").mkString(",\n")}
+           |) WITH (
+           |  'connector' = 'values'
+           |)
+           |""".stripMargin
+      )
+      .await()
 
-    tEnv.executeSql(
-      s"""
-         |INSERT INTO test_many_values VALUES
-         |${Range(0, 100)
-        .map(i => "(" + Range(0, 100).map(_ => s"$i").mkString(", ") + ")")
-        .mkString(", ")}
-         |""".stripMargin
-    ).await()
+    tEnv
+      .executeSql(
+        s"""
+           |INSERT INTO test_many_values VALUES
+           |${Range(0, 100)
+            .map(i => "(" + Range(0, 100).map(_ => s"$i").mkString(", ") + ")")
+            .mkString(", ")}
+           |""".stripMargin
+      )
+      .await()
 
     val expected = new java.util.ArrayList[String]()
     for (i <- 0 until 100) {
@@ -136,10 +139,8 @@ class CodeSplitITCase extends BatchTestBase {
   }
 
   private[flink] def runTest(sql: String, results: Seq[Row]): Unit = {
-    tEnv.getConfig.getConfiguration.setInteger(
-      TableConfigOptions.MAX_LENGTH_GENERATED_CODE, 4000)
-    tEnv.getConfig.getConfiguration.setInteger(
-      TableConfigOptions.MAX_MEMBERS_GENERATED_CODE, 10000)
+    tEnv.getConfig.set(TableConfigOptions.MAX_LENGTH_GENERATED_CODE, Int.box(4000))
+    tEnv.getConfig.set(TableConfigOptions.MAX_MEMBERS_GENERATED_CODE, Int.box(10000))
     checkResult(sql.mkString, results)
   }
 }

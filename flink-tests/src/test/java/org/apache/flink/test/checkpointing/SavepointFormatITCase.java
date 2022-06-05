@@ -31,24 +31,22 @@ import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.StateBackendOptions;
 import org.apache.flink.configuration.StateChangelogOptions;
 import org.apache.flink.core.execution.SavepointFormatType;
-import org.apache.flink.runtime.checkpoint.Checkpoints;
 import org.apache.flink.runtime.checkpoint.OperatorState;
 import org.apache.flink.runtime.checkpoint.metadata.CheckpointMetadata;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.RestoreMode;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
-import org.apache.flink.runtime.state.CompletedCheckpointStorageLocation;
 import org.apache.flink.runtime.state.IncrementalRemoteKeyedStateHandle;
 import org.apache.flink.runtime.state.KeyGroupsStateHandle;
 import org.apache.flink.runtime.state.KeyedStateHandle;
 import org.apache.flink.runtime.state.SavepointKeyedStateHandle;
 import org.apache.flink.runtime.state.changelog.ChangelogStateBackendHandle;
-import org.apache.flink.runtime.state.filesystem.AbstractFsCheckpointStorageAccess;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.test.util.MiniClusterWithClientResource;
 import org.apache.flink.testutils.logging.LoggerAuditingExtension;
+import org.apache.flink.util.TestLogger;
 
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -56,10 +54,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
 
-import java.io.DataInputStream;
-import java.io.IOException;
 import java.nio.file.Path;
 import java.util.LinkedList;
 import java.util.List;
@@ -69,11 +67,14 @@ import java.util.function.Predicate;
 
 import static java.util.Arrays.asList;
 import static org.apache.flink.runtime.testutils.CommonTestUtils.waitForAllTaskRunning;
+import static org.apache.flink.test.util.TestUtils.loadCheckpointMetadata;
 import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.MatcherAssert.assertThat;
 
 /** Tests for taking savepoint in different {@link SavepointFormatType format types}. */
-public class SavepointFormatITCase {
+public class SavepointFormatITCase extends TestLogger {
+    private static final Logger LOG = LoggerFactory.getLogger(SavepointFormatITCase.class);
+
     @TempDir Path checkpointsDir;
     @TempDir Path originalSavepointDir;
     @TempDir Path renamedSavepointDir;
@@ -262,6 +263,9 @@ public class SavepointFormatITCase {
                     .flatMap(subtaskState -> subtaskState.getManagedKeyedState().stream())
                     .forEach(handle -> validateState(handle, formatType, stateBackendConfig));
             relocateAndVerify(miniClusterResource, savepointPath, renamedSavepointDir, config);
+        } catch (Throwable t) {
+            LOG.info("Throwable caught, cluster will be shut down", t); // debug FLINK-26154
+            throw t;
         } finally {
             miniClusterResource.after();
         }
@@ -275,17 +279,6 @@ public class SavepointFormatITCase {
                                 .findFirst()
                                 .map(subtaskState -> subtaskState.getManagedKeyedState().hasState())
                                 .orElse(false);
-    }
-
-    private CheckpointMetadata loadCheckpointMetadata(String savepointPath) throws IOException {
-        CompletedCheckpointStorageLocation location =
-                AbstractFsCheckpointStorageAccess.resolveCheckpointPointer(savepointPath);
-
-        try (DataInputStream stream =
-                new DataInputStream(location.getMetadataHandle().openInputStream())) {
-            return Checkpoints.loadCheckpointMetadata(
-                    stream, Thread.currentThread().getContextClassLoader(), savepointPath);
-        }
     }
 
     private void relocateAndVerify(

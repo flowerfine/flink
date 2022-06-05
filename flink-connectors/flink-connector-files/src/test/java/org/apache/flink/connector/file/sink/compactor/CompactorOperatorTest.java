@@ -45,8 +45,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.types.Either;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.io.BufferedWriter;
 import java.io.FileOutputStream;
@@ -58,11 +57,13 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 /** Test for {@link CompactorOperator}. */
-public class CompactorOperatorTest extends AbstractCompactTestBase {
+class CompactorOperatorTest extends AbstractCompactTestBase {
 
     @Test
-    public void testCompact() throws Exception {
+    void testCompact() throws Exception {
         FileCompactor fileCompactor =
                 new RecordWiseFileCompactor<>(new DecoderBasedReader.Factory<>(IntDecoder::new));
         CompactorOperator compactor = createTestOperator(fileCompactor);
@@ -79,7 +80,7 @@ public class CompactorOperatorTest extends AbstractCompactTestBase {
                             Arrays.asList(committable("0", ".0", 5), committable("0", ".1", 5)),
                             null));
 
-            Assert.assertEquals(0, harness.extractOutputValues().size());
+            assertThat(harness.extractOutputValues()).isEmpty();
 
             harness.prepareSnapshotPreBarrier(1);
             harness.snapshot(1, 1L);
@@ -87,13 +88,13 @@ public class CompactorOperatorTest extends AbstractCompactTestBase {
 
             compactor.getAllTasksFuture().join();
 
-            Assert.assertEquals(0, harness.extractOutputValues().size());
+            assertThat(harness.extractOutputValues()).isEmpty();
 
             harness.prepareSnapshotPreBarrier(2);
 
             // 1summary+1compacted+2cleanup
             List<CommittableMessage<FileSinkCommittable>> results = harness.extractOutputValues();
-            Assert.assertEquals(4, results.size());
+            assertThat(results).hasSize(4);
             SinkV2Assertions.assertThat((CommittableSummary<?>) results.get(0))
                     .hasPendingCommittables(3);
             SinkV2Assertions.assertThat((CommittableWithLineage<?>) results.get(1))
@@ -106,7 +107,7 @@ public class CompactorOperatorTest extends AbstractCompactTestBase {
     }
 
     @Test
-    public void testPassthrough() throws Exception {
+    void testPassthrough() throws Exception {
         FileCompactor fileCompactor =
                 new RecordWiseFileCompactor<>(new DecoderBasedReader.Factory<>(IntDecoder::new));
         CompactorOperator compactor = createTestOperator(fileCompactor);
@@ -125,7 +126,7 @@ public class CompactorOperatorTest extends AbstractCompactTestBase {
             harness.processElement(
                     request("0", null, Collections.singletonList(cleanupPathRequest)));
 
-            Assert.assertEquals(0, harness.extractOutputValues().size());
+            assertThat(harness.extractOutputValues()).isEmpty();
 
             harness.prepareSnapshotPreBarrier(1);
             harness.snapshot(1, 1L);
@@ -133,12 +134,12 @@ public class CompactorOperatorTest extends AbstractCompactTestBase {
 
             compactor.getAllTasksFuture().join();
 
-            Assert.assertEquals(0, harness.extractOutputValues().size());
+            assertThat(harness.extractOutputValues()).isEmpty();
 
             harness.prepareSnapshotPreBarrier(2);
 
             List<CommittableMessage<FileSinkCommittable>> results = harness.extractOutputValues();
-            Assert.assertEquals(3, results.size());
+            assertThat(results).hasSize(3);
             SinkV2Assertions.assertThat((CommittableSummary<?>) results.get(0))
                     .hasPendingCommittables(2);
             SinkV2Assertions.assertThat((CommittableWithLineage<?>) results.get(1))
@@ -149,7 +150,7 @@ public class CompactorOperatorTest extends AbstractCompactTestBase {
     }
 
     @Test
-    public void testRestore() throws Exception {
+    void testRestore() throws Exception {
         FileCompactor fileCompactor =
                 new RecordWiseFileCompactor<>(new DecoderBasedReader.Factory<>(IntDecoder::new));
         CompactorOperator compactor = createTestOperator(fileCompactor);
@@ -193,7 +194,7 @@ public class CompactorOperatorTest extends AbstractCompactTestBase {
             harness.prepareSnapshotPreBarrier(3);
 
             // the result of request 1 should be emitted
-            Assert.assertEquals(4, harness.extractOutputValues().size());
+            assertThat(harness.extractOutputValues()).hasSize(4);
 
             harness.snapshot(3, 3L);
             harness.notifyOfCompletedCheckpoint(3L);
@@ -203,11 +204,11 @@ public class CompactorOperatorTest extends AbstractCompactTestBase {
             harness.prepareSnapshotPreBarrier(4);
 
             // the result of request 2 should be emitted
-            Assert.assertEquals(8, harness.extractOutputValues().size());
+            assertThat(harness.extractOutputValues()).hasSize(8);
 
             // 1summary+1compacted+2cleanup * 2
             List<CommittableMessage<FileSinkCommittable>> results = harness.extractOutputValues();
-            Assert.assertEquals(8, results.size());
+            assertThat(results).hasSize(8);
             SinkV2Assertions.assertThat((CommittableSummary<?>) results.get(0))
                     .hasPendingCommittables(3);
             SinkV2Assertions.assertThat((CommittableWithLineage<?>) results.get(1))
@@ -229,7 +230,7 @@ public class CompactorOperatorTest extends AbstractCompactTestBase {
     }
 
     @Test
-    public void testStateHandler() throws Exception {
+    void testStateHandler() throws Exception {
         FileCompactor fileCompactor =
                 new RecordWiseFileCompactor<>(new DecoderBasedReader.Factory<>(IntDecoder::new));
         CompactorOperator compactor = createTestOperator(fileCompactor);
@@ -308,28 +309,21 @@ public class CompactorOperatorTest extends AbstractCompactTestBase {
                                     new CommittableWithLineage<>(
                                             committable("0", "7", 8), 3L, 0))));
 
-            Assert.assertTrue(handler.isWriterStateDrained());
-            Assert.assertFalse(handler.isStateDrained());
+            harness.processElement(
+                    new StreamRecord<>(Either.Left(new CommittableSummary<>(0, 1, 4L, 0, 0, 0))));
 
-            // the result should not be emitted yet, but all requests should already be submitted
-            Assert.assertEquals(0, harness.extractOutputValues().size());
+            harness.processElement(
+                    new StreamRecord<>(Either.Left(new CommittableSummary<>(0, 1, 5L, 3, 3, 0))));
 
-            compactor.getAllTasksFuture().join();
-            // state should be drained, and all results and holding messages should be emitted
-            harness.prepareSnapshotPreBarrier(3);
-
-            Assert.assertTrue(handler.isStateDrained());
-
-            // summary should be merged into one
-            // 1 summary+ 1 compacted + (1 compacted committable + 1 compacted cleanup) * 7
+            // 1 summary + (1 compacted committable + 1 compacted cleanup) * 6 + 1 hidden + 1 normal
+            // + 1 summary + 1 cleanup + 1 summary
             List<CommittableMessage<FileSinkCommittable>> results = harness.extractOutputValues();
-            Assert.assertEquals(16, results.size());
+            assertThat(results).hasSize(18);
             SinkV2Assertions.assertThat((CommittableSummary<?>) results.get(0))
-                    .hasPendingCommittables(15);
+                    .hasPendingCommittables(14);
 
             List<FileSinkCommittable> expectedResult =
                     Arrays.asList(
-                            committable("0", "7", 8),
                             committable("0", "compacted-0", 1),
                             cleanupPath("0", ".0"),
                             committable("0", "compacted-1", 2),
@@ -343,12 +337,120 @@ public class CompactorOperatorTest extends AbstractCompactTestBase {
                             committable("0", "compacted-5", 6),
                             cleanupPath("0", ".5"),
                             committable("0", "compacted-6", 7),
-                            cleanupPath("0", ".6"));
+                            committable("0", "7", 8));
 
-            for (int i = 1; i < results.size(); ++i) {
-                SinkV2Assertions.assertThat((CommittableWithLineage<?>) results.get(i))
-                        .hasCommittable(expectedResult.get(i - 1));
+            for (int i = 0; i < expectedResult.size(); ++i) {
+                SinkV2Assertions.assertThat((CommittableWithLineage<?>) results.get(i + 1))
+                        .hasCommittable(expectedResult.get(i));
             }
+
+            SinkV2Assertions.assertThat((CommittableSummary<?>) results.get(15))
+                    .hasPendingCommittables(1);
+            SinkV2Assertions.assertThat((CommittableWithLineage<?>) results.get(16))
+                    .hasCommittable(cleanupPath("0", ".6"));
+
+            SinkV2Assertions.assertThat((CommittableSummary<?>) results.get(17))
+                    .hasPendingCommittables(3);
+        }
+    }
+
+    @Test
+    void testStateHandlerRestore() throws Exception {
+        OperatorSubtaskState state;
+        try (OneInputStreamOperatorTestHarness<
+                        Either<CommittableMessage<FileSinkCommittable>, CompactorRequest>,
+                        CommittableMessage<FileSinkCommittable>>
+                harness =
+                        new OneInputStreamOperatorTestHarness<>(
+                                new CompactorOperatorStateHandler(
+                                        getTestCommittableSerializer(),
+                                        createTestBucketWriter()))) {
+            harness.setup();
+            harness.open();
+
+            // remaining request from coordinator
+            harness.processElement(
+                    new StreamRecord<>(
+                            Either.Right(
+                                    request(
+                                                    "0",
+                                                    Collections.singletonList(
+                                                            committable("0", ".1", 1)),
+                                                    null)
+                                            .getValue())));
+
+            // process only summary during cp1, unaligned barrier may be processed ahead of the
+            // elements
+            harness.processElement(
+                    new StreamRecord<>(Either.Left(new CommittableSummary<>(0, 1, 1L, 2, 2, 0))));
+
+            state = harness.snapshot(1, 1L);
+
+            List<CommittableMessage<FileSinkCommittable>> results = harness.extractOutputValues();
+            assertThat(results).hasSize(3);
+            SinkV2Assertions.assertThat((CommittableSummary<?>) results.get(0))
+                    .hasPendingCommittables(4);
+            SinkV2Assertions.assertThat((CommittableWithLineage<?>) results.get(1))
+                    .hasCommittable(committable("0", "compacted-1", 1));
+            SinkV2Assertions.assertThat((CommittableWithLineage<?>) results.get(2))
+                    .hasCommittable(cleanupPath("0", ".1"));
+        }
+
+        try (OneInputStreamOperatorTestHarness<
+                        Either<CommittableMessage<FileSinkCommittable>, CompactorRequest>,
+                        CommittableMessage<FileSinkCommittable>>
+                harness =
+                        new OneInputStreamOperatorTestHarness<>(
+                                new CompactorOperatorStateHandler(
+                                        getTestCommittableSerializer(),
+                                        createTestBucketWriter()))) {
+            harness.setup();
+            harness.initializeState(state);
+            harness.open();
+
+            harness.processElement(
+                    new StreamRecord<>(
+                            Either.Left(
+                                    new CommittableWithLineage<>(
+                                            committable("0", ".2", 2), 1L, 0))));
+
+            harness.processElement(
+                    new StreamRecord<>(
+                            Either.Left(
+                                    new CommittableWithLineage<>(
+                                            committable("0", "3", 3), 1L, 0))));
+
+            state = harness.snapshot(2, 2L);
+
+            List<CommittableMessage<FileSinkCommittable>> results = harness.extractOutputValues();
+            assertThat(results).hasSize(2);
+            SinkV2Assertions.assertThat((CommittableWithLineage<?>) results.get(0))
+                    .hasCommittable(committable("0", "2", 2));
+            SinkV2Assertions.assertThat((CommittableWithLineage<?>) results.get(1))
+                    .hasCommittable(committable("0", "3", 3));
+        }
+
+        try (OneInputStreamOperatorTestHarness<
+                        Either<CommittableMessage<FileSinkCommittable>, CompactorRequest>,
+                        CommittableMessage<FileSinkCommittable>>
+                harness =
+                        new OneInputStreamOperatorTestHarness<>(
+                                new CompactorOperatorStateHandler(
+                                        getTestCommittableSerializer(),
+                                        createTestBucketWriter()))) {
+            harness.setup();
+            harness.initializeState(state);
+            harness.open();
+
+            harness.processElement(
+                    new StreamRecord<>(Either.Left(new CommittableSummary<>(0, 1, 2L, 0, 0, 0))));
+
+            List<CommittableMessage<FileSinkCommittable>> results = harness.extractOutputValues();
+            assertThat(results).hasSize(2);
+            SinkV2Assertions.assertThat((CommittableSummary<?>) results.get(0))
+                    .hasPendingCommittables(1);
+            SinkV2Assertions.assertThat((CommittableWithLineage<?>) results.get(1))
+                    .hasCommittable(cleanupPath("0", ".2"));
         }
     }
 

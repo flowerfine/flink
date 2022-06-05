@@ -153,6 +153,22 @@ When deploying Flink, there are often multiple options available for each buildi
 </table>
 
 
+### Repeatable Resource Cleanup
+
+Once a job has reached a globally terminal state of either finished, failed or cancelled, the
+external component resources associated with the job are then cleaned up. In the event of a
+failure when cleaning up a resource, Flink will attempt to retry the cleanup. You can
+[configure]({{< ref "docs/deployment/config#retryable-cleanup" >}}) the retry strategy used. 
+Reaching the maximum number of retries without succeeding will leave the job in a dirty state. 
+Its artifacts would need to be cleaned up manually (see the 
+[High Availability Services / JobResultStore]({{< ref "docs/deployment/ha/overview#jobresultstore" >}})
+section for further details). Restarting the very same job (i.e. using the same 
+job ID) will result in the cleanup being restarted without running the job again.
+
+There is currently an issue with the cleanup of CompletedCheckpoints that failed to be deleted 
+while subsuming them as part of the usual CompletedCheckpoint management. These artifacts are 
+not covered by the repeatable cleanup, i.e. they have to be deleted manually, still. This is 
+covered by [FLINK-26606](https://issues.apache.org/jira/browse/FLINK-26606).
 
 ## Deployment Modes
 
@@ -167,7 +183,7 @@ Flink can execute applications in one of three ways:
 
 
 <!-- Image source: https://docs.google.com/drawings/d/1EfloufuOp1A7YDwZmBEsHKRLIrrbtRkoWRPcfZI5RYQ/edit?usp=sharing -->
-{{< img class="img-fluid" width="80%" style="margin: 15px" src="/fig/deployment_modes.svg" alt="Figure for Deployment Modes" >}}
+{{< img class="img-fluid" width="100%" style="margin: 15px" src="/fig/deployment_modes.svg" alt="Figure for Deployment Modes" >}}
 
 ### Application Mode
     
@@ -180,7 +196,7 @@ network bandwidth to download dependencies and ship binaries to the cluster, and
 
 Building on this observation, the *Application Mode* creates a cluster per submitted application, but this time,
 the `main()` method of the application is executed by the *JobManager*. Creating a cluster per application can be 
-seen as creating a session cluster shared only among the jobs of a particular application, and torn down when
+seen as creating a session cluster shared only among the jobs of a particular application, and turning down when
 the application finishes. With this architecture, the *Application Mode* provides the same resource isolation
 and load balancing guarantees as the *Per-Job* mode, but at the granularity of a whole application.
 
@@ -298,7 +314,7 @@ Supported Environment:
 
 #### Huawei Cloud Stream Service
 
-[Website](https://www.huaweicloud.com/en-us/product/cs.html)
+[Website](https://www.huaweicloud.com/intl/en-us/product/cs.html)
 
 Supported Environment:
 {{< label Huawei Cloud >}}

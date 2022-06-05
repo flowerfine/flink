@@ -23,16 +23,19 @@ import org.apache.flink.connector.aws.testutils.AWSServicesTestUtils;
 import org.apache.flink.connector.base.sink.writer.ElementConverter;
 import org.apache.flink.connector.base.sink.writer.TestSinkInitContext;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.core.SdkBytes;
+import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.services.firehose.model.Record;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Properties;
+import java.util.concurrent.CompletionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /** Covers construction, defaults and sanity checking of {@link KinesisFirehoseSinkWriter}. */
 public class KinesisFirehoseSinkWriterTest {
@@ -44,8 +47,8 @@ public class KinesisFirehoseSinkWriterTest {
                     .setSerializationSchema(new SimpleStringSchema())
                     .build();
 
-    @Before
-    public void setup() {
+    @BeforeEach
+    void setup() {
         TestSinkInitContext sinkInitContext = new TestSinkInitContext();
         Properties sinkProperties = AWSServicesTestUtils.createConfig("https://fake_aws_endpoint");
         sinkWriter =
@@ -64,7 +67,7 @@ public class KinesisFirehoseSinkWriterTest {
     }
 
     @Test
-    public void getSizeInBytesReturnsSizeOfBlobBeforeBase64Encoding() {
+    void getSizeInBytesReturnsSizeOfBlobBeforeBase64Encoding() {
         String testString = "{many hands make light work;";
         Record record = Record.builder().data(SdkBytes.fromUtf8String(testString)).build();
         assertThat(sinkWriter.getSizeInBytes(record))
@@ -72,14 +75,13 @@ public class KinesisFirehoseSinkWriterTest {
     }
 
     @Test
-    public void getNumRecordsOutErrorsCounterRecordsCorrectNumberOfFailures()
+    void getNumRecordsOutErrorsCounterRecordsCorrectNumberOfFailures()
             throws IOException, InterruptedException {
-        Properties prop = AWSServicesTestUtils.createConfig("https://fake_aws_endpoint");
         TestSinkInitContext ctx = new TestSinkInitContext();
         KinesisFirehoseSink<String> kinesisFirehoseSink =
                 new KinesisFirehoseSink<>(
                         ELEMENT_CONVERTER_PLACEHOLDER,
-                        6,
+                        12,
                         16,
                         10000,
                         4 * 1024 * 1024L,
@@ -87,13 +89,18 @@ public class KinesisFirehoseSinkWriterTest {
                         1000 * 1024L,
                         true,
                         "test-stream",
-                        prop);
+                        AWSServicesTestUtils.createConfig("https://localhost"));
         SinkWriter<String> writer = kinesisFirehoseSink.createWriter(ctx);
 
         for (int i = 0; i < 12; i++) {
             writer.write("data_bytes", null);
         }
-
+        assertThatExceptionOfType(CompletionException.class)
+                .isThrownBy(() -> writer.flush(true))
+                .withCauseInstanceOf(SdkClientException.class)
+                .withMessageContaining(
+                        "Unable to execute HTTP request: Connection refused: localhost/127.0.0.1:443");
         assertThat(ctx.metricGroup().getNumRecordsOutErrorsCounter().getCount()).isEqualTo(12);
+        assertThat(ctx.metricGroup().getNumRecordsSendErrorsCounter().getCount()).isEqualTo(12);
     }
 }
