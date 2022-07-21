@@ -174,7 +174,9 @@ public class NettyShuffleUtilsTest extends TestLogger {
                         shuffleDescriptor.getResultPartitionID().getPartitionId(),
                         resultPartitionType,
                         numSubpartitions,
-                        0);
+                        0,
+                        false,
+                        true);
         ResultPartitionDeploymentDescriptor resultPartitionDeploymentDescriptor =
                 new ResultPartitionDeploymentDescriptor(partitionDescriptor, shuffleDescriptor, 1);
 
@@ -206,7 +208,7 @@ public class NettyShuffleUtilsTest extends TestLogger {
     }
 
     private int calculateBuffersConsumption(ResultPartition partition) {
-        if (partition.getPartitionType().isBlocking()) {
+        if (!partition.getPartitionType().canBePipelinedConsumed()) {
             return partition.getBufferPool().getNumberOfRequiredMemorySegments();
         } else {
             return partition.getBufferPool().getMaxNumberOfMemorySegments();

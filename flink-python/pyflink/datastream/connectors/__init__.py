@@ -16,18 +16,24 @@
 # limitations under the License.
 ################################################################################
 from pyflink.datastream.connectors.base import Sink, Source, DeliveryGuarantee
+from pyflink.datastream.connectors.elasticsearch import (Elasticsearch6SinkBuilder,
+                                                         Elasticsearch7SinkBuilder)
 from pyflink.datastream.connectors.file_system import (FileEnumeratorProvider, FileSink, FileSource,
                                                        BucketAssigner, FileSourceBuilder,
                                                        FileSplitAssignerProvider, OutputFileConfig,
                                                        RollingPolicy,
-                                                       StreamFormat, StreamingFileSink)
+                                                       StreamFormat, StreamingFileSink, BulkFormat)
 from pyflink.datastream.connectors.jdbc import JdbcSink, JdbcConnectionOptions, JdbcExecutionOptions
-from pyflink.datastream.connectors.kafka import FlinkKafkaConsumer, FlinkKafkaProducer, Semantic
+from pyflink.datastream.connectors.kafka import (FlinkKafkaConsumer, FlinkKafkaProducer, Semantic,
+                                                 KafkaSource)
 from pyflink.datastream.connectors.number_seq import NumberSequenceSource
 from pyflink.datastream.connectors.pulsar import PulsarDeserializationSchema, PulsarSource, \
     PulsarSourceBuilder, SubscriptionType, StartCursor, StopCursor, PulsarSerializationSchema, \
     PulsarSink, PulsarSinkBuilder, MessageDelayer, TopicRoutingMode
 from pyflink.datastream.connectors.rabbitmq import RMQConnectionConfig, RMQSource, RMQSink
+from pyflink.datastream.connectors.kinesis import (FlinkKinesisConsumer, KinesisStreamsSink,
+                                                   KinesisFirehoseSink)
+from pyflink.datastream.connectors.cassandra import CassandraSink
 
 
 __all__ = [
@@ -43,6 +49,7 @@ __all__ = [
     'FlinkKafkaConsumer',
     'FlinkKafkaProducer',
     'Semantic',
+    'KafkaSource',
     'JdbcSink',
     'JdbcConnectionOptions',
     'JdbcExecutionOptions',
@@ -63,7 +70,13 @@ __all__ = [
     'RollingPolicy',
     'StartCursor',
     'StopCursor',
+    'BulkFormat',
     'StreamFormat',
     'StreamingFileSink',
-    'SubscriptionType'
+    'FlinkKinesisConsumer',
+    'KinesisStreamsSink',
+    'KinesisFirehoseSink',
+    'Elasticsearch6SinkBuilder',
+    'Elasticsearch7SinkBuilder',
+    'CassandraSink'
 ]

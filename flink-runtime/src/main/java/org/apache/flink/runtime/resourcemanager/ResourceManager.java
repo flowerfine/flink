@@ -60,9 +60,11 @@ import org.apache.flink.runtime.rest.messages.ThreadDumpInfo;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerInfo;
 import org.apache.flink.runtime.rpc.FatalErrorHandler;
 import org.apache.flink.runtime.rpc.FencedRpcEndpoint;
+import org.apache.flink.runtime.rpc.Local;
 import org.apache.flink.runtime.rpc.RpcService;
 import org.apache.flink.runtime.rpc.RpcServiceUtils;
 import org.apache.flink.runtime.security.token.DelegationTokenManager;
+import org.apache.flink.runtime.shuffle.ShuffleDescriptor;
 import org.apache.flink.runtime.slots.ResourceRequirement;
 import org.apache.flink.runtime.slots.ResourceRequirements;
 import org.apache.flink.runtime.taskexecutor.FileType;
@@ -72,6 +74,7 @@ import org.apache.flink.runtime.taskexecutor.TaskExecutorHeartbeatPayload;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorRegistrationRejection;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorRegistrationSuccess;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorThreadInfoGateway;
+import org.apache.flink.runtime.taskexecutor.partition.ClusterPartitionReport;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.concurrent.FutureUtils;
@@ -81,6 +84,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -778,6 +782,22 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
     }
 
     @Override
+    public CompletableFuture<Void> reportClusterPartitions(
+            ResourceID taskExecutorId, ClusterPartitionReport clusterPartitionReport) {
+        clusterPartitionTracker.processTaskExecutorClusterPartitionReport(
+                taskExecutorId, clusterPartitionReport);
+        return CompletableFuture.completedFuture(null);
+    }
+
+    @Override
+    public CompletableFuture<List<ShuffleDescriptor>> getClusterPartitionsShuffleDescriptors(
+            IntermediateDataSetID intermediateDataSetID) {
+        return CompletableFuture.completedFuture(
+                clusterPartitionTracker.getClusterPartitionShuffleDescriptors(
+                        intermediateDataSetID));
+    }
+
+    @Override
     public CompletableFuture<Map<IntermediateDataSetID, DataSetMetaInfo>> listDataSets() {
         return CompletableFuture.completedFuture(clusterPartitionTracker.listDataSets());
     }
@@ -799,6 +819,7 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
     }
 
     @Override
+    @Local // Bug; see FLINK-27954
     public CompletableFuture<TaskExecutorThreadInfoGateway> requestTaskExecutorThreadInfoGateway(
             ResourceID taskManagerId, Time timeout) {
 
@@ -921,7 +942,8 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
                             taskExecutorRegistration.getHardwareDescription(),
                             taskExecutorRegistration.getMemoryConfiguration(),
                             taskExecutorRegistration.getTotalResourceProfile(),
-                            taskExecutorRegistration.getDefaultSlotResourceProfile());
+                            taskExecutorRegistration.getDefaultSlotResourceProfile(),
+                            taskExecutorRegistration.getNodeId());
 
             log.info(
                     "Registering TaskManager with ResourceID {} ({}) at ResourceManager",
