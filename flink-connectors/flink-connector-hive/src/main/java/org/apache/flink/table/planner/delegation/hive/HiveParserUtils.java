@@ -88,6 +88,7 @@ import org.apache.calcite.sql.SqlSyntax;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlReturnTypeInference;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.sql.validate.SqlNameMatchers;
 import org.apache.calcite.sql.validate.SqlUserDefinedTableFunction;
@@ -184,15 +185,12 @@ public class HiveParserUtils {
 
     // Overrides CalcitePlanner::canHandleQbForCbo to support SORT BY, CLUSTER BY, etc.
     public static String canHandleQbForCbo(QueryProperties queryProperties) {
-        if (!queryProperties.hasPTF() && !queryProperties.usesScript()) {
+        if (!queryProperties.hasPTF()) {
             return null;
         }
         String msg = "";
         if (queryProperties.hasPTF()) {
             msg += "has PTF; ";
-        }
-        if (queryProperties.usesScript()) {
-            msg += "uses scripts; ";
         }
         return msg;
     }
@@ -1609,6 +1607,8 @@ public class HiveParserUtils {
         final SqlAggFunction aggFunc =
                 HiveParserSqlFunctionConverter.getCalciteAggFn(
                         aggInfo.getUdfName(), aggInfo.isDistinct(), calciteArgTypes, aggFnRetType);
+        SqlAggFunction convertedAggFunction =
+                (SqlAggFunction) funcConverter.convertOperator(aggFunc);
 
         // If we have input arguments, set type to null (instead of aggFnRetType) to let
         // AggregateCall
@@ -1616,9 +1616,17 @@ public class HiveParserUtils {
         RelDataType type = null;
         if (aggInfo.isAllColumns() && argIndices.isEmpty()) {
             type = aggFnRetType;
+            if (funcConverter.hasOverloadedOp(
+                    convertedAggFunction, SqlFunctionCategory.USER_DEFINED_FUNCTION)) {
+                // it means the agg function will delegate to Hive's built-in function.
+                // Hive's UDAF always infer nullable datatype.
+                // so make it nullable to avoid inferred type of the agg function is different from
+                // the type it was given when it was created.
+                type = typeFactory.createTypeWithNullability(aggFnRetType, true);
+            }
         }
         return createAggregateCall(
-                (SqlAggFunction) funcConverter.convertOperator(aggFunc),
+                convertedAggFunction,
                 aggInfo.isDistinct(),
                 false,
                 false,
@@ -1675,5 +1683,10 @@ public class HiveParserUtils {
                 collation,
                 type,
                 name);
+    }
+
+    public static boolean isFromTimeStampToDecimal(RelDataType srcType, RelDataType targetType) {
+        return srcType.getSqlTypeName().equals(SqlTypeName.TIMESTAMP)
+                && targetType.getSqlTypeName().equals(SqlTypeName.DECIMAL);
     }
 }
