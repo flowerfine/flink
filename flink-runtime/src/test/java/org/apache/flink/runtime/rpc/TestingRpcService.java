@@ -81,8 +81,8 @@ public class TestingRpcService implements RpcService {
     // ------------------------------------------------------------------------
 
     @Override
-    public CompletableFuture<Void> stopService() {
-        final CompletableFuture<Void> terminationFuture = backingRpcService.stopService();
+    public CompletableFuture<Void> closeAsync() {
+        final CompletableFuture<Void> terminationFuture = backingRpcService.closeAsync();
 
         terminationFuture.whenComplete(
                 (Void ignored, Throwable throwable) -> {
@@ -187,6 +187,11 @@ public class TestingRpcService implements RpcService {
     @Override
     public int getPort() {
         return backingRpcService.getPort();
+    }
+
+    @Override
+    public <C extends RpcGateway> C getSelfGateway(Class<C> selfGatewayType, RpcServer rpcServer) {
+        return backingRpcService.getSelfGateway(selfGatewayType, rpcServer);
     }
 
     @Override

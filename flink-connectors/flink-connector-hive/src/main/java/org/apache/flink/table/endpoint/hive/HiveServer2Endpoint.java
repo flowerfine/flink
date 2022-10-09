@@ -22,6 +22,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.SqlDialect;
+import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogBaseTable.TableKind;
 import org.apache.flink.table.catalog.ResolvedSchema;
@@ -156,6 +157,7 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
     private static final TStatus OK_STATUS = new TStatus(TStatusCode.SUCCESS_STATUS);
     private static final String UNSUPPORTED_ERROR_MESSAGE =
             "The HiveServer2 Endpoint currently doesn't support to %s.";
+    private static final Long CHECK_INTERVAL_MS = 100L;
 
     // --------------------------------------------------------------------------------------------
     // Server attributes
@@ -181,7 +183,7 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
 
     private final String catalogName;
     @Nullable private final String defaultDatabase;
-    @Nullable private final String hiveConfPath;
+    private final HiveConf hiveConf;
     private final boolean allowEmbedded;
 
     // --------------------------------------------------------------------------------------------
@@ -200,7 +202,7 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
             int maxWorkerThreads,
             Duration workerKeepAliveTime,
             String catalogName,
-            @Nullable String hiveConfPath,
+            HiveConf hiveConf,
             @Nullable String defaultDatabase,
             String moduleName) {
         this(
@@ -213,7 +215,7 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
                 maxWorkerThreads,
                 workerKeepAliveTime,
                 catalogName,
-                hiveConfPath,
+                hiveConf,
                 defaultDatabase,
                 moduleName,
                 false,
@@ -231,7 +233,7 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
             int maxWorkerThreads,
             Duration workerKeepAliveTime,
             String catalogName,
-            @Nullable String hiveConfPath,
+            HiveConf hiveConf,
             @Nullable String defaultDatabase,
             String moduleName,
             boolean allowEmbedded,
@@ -248,7 +250,7 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
         this.isVerbose = isVerbose;
 
         this.catalogName = checkNotNull(catalogName);
-        this.hiveConfPath = hiveConfPath;
+        this.hiveConf = hiveConf;
         this.defaultDatabase = defaultDatabase;
 
         this.moduleName = moduleName;
@@ -294,14 +296,8 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
                     tOpenSessionReq.getConfiguration() == null
                             ? Collections.emptyMap()
                             : tOpenSessionReq.getConfiguration();
-            Map<String, String> sessionConfig = new HashMap<>();
-            sessionConfig.put(TABLE_SQL_DIALECT.key(), SqlDialect.HIVE.name());
-            sessionConfig.put(RUNTIME_MODE.key(), RuntimeExecutionMode.BATCH.name());
-            sessionConfig.put(TABLE_DML_SYNC.key(), "true");
-            HiveConf conf = HiveCatalog.createHiveConf(hiveConfPath, null);
-            // set variables to HiveConf or Session's conf
-            setVariables(conf, sessionConfig, originSessionConf);
 
+            HiveConf conf = new HiveConf(hiveConf);
             Catalog hiveCatalog =
                     new HiveCatalog(
                             catalogName,
@@ -309,7 +305,18 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
                             conf,
                             HiveShimLoader.getHiveVersion(),
                             allowEmbedded);
+            // Trigger the creation of the HiveMetaStoreClient to use the same HiveConf. If the
+            // initial HiveConf is different, it will trigger the PersistenceManagerFactory to close
+            // all the alive PersistenceManager in the ObjectStore, which may get error like
+            // "Persistence Manager has been closed" in the later connection.
+            hiveCatalog.open();
             Module hiveModule = new HiveModule();
+            // set variables to HiveConf and Session's conf
+            Map<String, String> sessionConfig = new HashMap<>();
+            sessionConfig.put(TABLE_SQL_DIALECT.key(), SqlDialect.HIVE.name());
+            sessionConfig.put(RUNTIME_MODE.key(), RuntimeExecutionMode.BATCH.name());
+            sessionConfig.put(TABLE_DML_SYNC.key(), "true");
+            setVariables(conf, sessionConfig, originSessionConf);
             SessionHandle sessionHandle =
                     service.openSession(
                             SessionEnvironment.newBuilder()
@@ -378,13 +385,9 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
     public TExecuteStatementResp ExecuteStatement(TExecuteStatementReq tExecuteStatementReq)
             throws TException {
         TExecuteStatementResp resp = new TExecuteStatementResp();
+        SessionHandle sessionHandle = toSessionHandle(tExecuteStatementReq.getSessionHandle());
+        OperationHandle operationHandle = null;
         try {
-            if (!tExecuteStatementReq.isRunAsync()) {
-                throw new UnsupportedOperationException(
-                        "Currently SqlGateway HiveServer2 Endpoint only supports ExecuteStatement in async mode.");
-            }
-
-            SessionHandle sessionHandle = toSessionHandle(tExecuteStatementReq.getSessionHandle());
             String statement =
                     tExecuteStatementReq.isSetStatement()
                             ? tExecuteStatementReq.getStatement()
@@ -395,20 +398,27 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
                             : Collections.emptyMap();
             long timeout = tExecuteStatementReq.getQueryTimeout();
 
-            OperationHandle operationHandle =
+            operationHandle =
                     service.executeStatement(
                             sessionHandle,
                             statement,
                             timeout,
                             Configuration.fromMap(executionConfig));
-            resp.setStatus(OK_STATUS);
 
+            if (!tExecuteStatementReq.isRunAsync()) {
+                waitUntilOperationIsTerminated(sessionHandle, operationHandle);
+            }
+
+            resp.setStatus(OK_STATUS);
             resp.setOperationHandle(
                     toTOperationHandle(
                             sessionHandle, operationHandle, TOperationType.EXECUTE_STATEMENT));
         } catch (Throwable t) {
             LOG.error("Failed to ExecuteStatement.", t);
             resp.setStatus(toTStatus(t));
+            if (operationHandle != null) {
+                closeOperationSilently(sessionHandle, operationHandle);
+            }
         }
         return resp;
     }
@@ -718,7 +728,7 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
                     service.fetchResults(
                             sessionHandle,
                             operationHandle,
-                            toFetchOrientation(tFetchResultsReq.getFetchType()),
+                            toFetchOrientation(tFetchResultsReq.getOrientation()),
                             maxRows);
             resp.setStatus(OK_STATUS);
             resp.setHasMoreRows(resultSet.getResultType() != EOS);
@@ -796,7 +806,6 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
                 && Objects.equals(workerKeepAliveTime, that.workerKeepAliveTime)
                 && Objects.equals(catalogName, that.catalogName)
                 && Objects.equals(defaultDatabase, that.defaultDatabase)
-                && Objects.equals(hiveConfPath, that.hiveConfPath)
                 && Objects.equals(allowEmbedded, that.allowEmbedded)
                 && Objects.equals(isVerbose, that.isVerbose)
                 && Objects.equals(moduleName, that.moduleName);
@@ -814,7 +823,6 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
                 maxMessageSize,
                 catalogName,
                 defaultDatabase,
-                hiveConfPath,
                 allowEmbedded,
                 isVerbose,
                 moduleName);
@@ -858,6 +866,62 @@ public class HiveServer2Endpoint implements TCLIService.Iface, SqlGatewayEndpoin
                                     .executorService(executor));
         } catch (Exception e) {
             throw new SqlGatewayException("Failed to build the server.", e);
+        }
+    }
+
+    /**
+     * Similar solution comparing to the {@code
+     * org.apache.hive.jdbc.HiveStatement#waitForOperationToComplete}.
+     *
+     * <p>The better solution is to introduce an interface similar to {@link TableResult#await()}.
+     */
+    private void waitUntilOperationIsTerminated(
+            SessionHandle sessionHandle, OperationHandle operationHandle) throws Exception {
+        OperationInfo info;
+        do {
+            info = service.getOperationInfo(sessionHandle, operationHandle);
+            switch (info.getStatus()) {
+                case INITIALIZED:
+                case PENDING:
+                case RUNNING:
+                    Thread.sleep(CHECK_INTERVAL_MS);
+                    break;
+                case CANCELED:
+                case TIMEOUT:
+                    throw new SqlGatewayException(
+                            String.format(
+                                    "The operation %s's status is %s for the session %s.",
+                                    operationHandle, info.getStatus(), sessionHandle));
+                case ERROR:
+                    throw new SqlGatewayException(
+                            String.format(
+                                    "The operation %s's status is %s for the session %s.",
+                                    operationHandle, info.getStatus(), sessionHandle),
+                            info.getException()
+                                    .orElseThrow(
+                                            () ->
+                                                    new SqlGatewayException(
+                                                            "Impossible! ERROR status should contains the error.")));
+                case FINISHED:
+                    return;
+                default:
+                    throw new SqlGatewayException(
+                            String.format("Unknown status: %s.", info.getStatus()));
+            }
+        } while (true);
+    }
+
+    private void closeOperationSilently(
+            SessionHandle sessionHandle, OperationHandle operationHandle) {
+        try {
+            service.closeOperation(sessionHandle, operationHandle);
+        } catch (Throwable t) {
+            // ignore
+            LOG.error(
+                    String.format(
+                            "Close the operation %s for the session %s silently.",
+                            operationHandle, sessionHandle),
+                    t);
         }
     }
 

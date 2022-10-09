@@ -197,6 +197,20 @@ public class AkkaRpcService implements RpcService {
         return port;
     }
 
+    public <C extends RpcGateway> C getSelfGateway(Class<C> selfGatewayType, RpcServer rpcServer) {
+        if (selfGatewayType.isInstance(rpcServer)) {
+            @SuppressWarnings("unchecked")
+            C selfGateway = ((C) rpcServer);
+
+            return selfGateway;
+        } else {
+            throw new ClassCastException(
+                    "RpcEndpoint does not implement the RpcGateway interface of type "
+                            + selfGatewayType
+                            + '.');
+        }
+    }
+
     // this method does not mutate state and is thus thread-safe
     @Override
     public <C extends RpcGateway> CompletableFuture<C> connect(
@@ -390,7 +404,7 @@ public class AkkaRpcService implements RpcService {
     }
 
     @Override
-    public CompletableFuture<Void> stopService() {
+    public CompletableFuture<Void> closeAsync() {
         final CompletableFuture<Void> akkaRpcActorsTerminationFuture;
 
         synchronized (lock) {
